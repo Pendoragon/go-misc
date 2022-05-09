@@ -56,9 +56,9 @@ int bpf_prog1(struct bpf_perf_event_data *ctx)
 	u64 *val, one = 1;
 	int ret;
 
-	/* if (ctx->sample_period < 10000) */
-	/* 	/\* ignore warmup *\/ */
-	/* 	return 0; */
+	if (ctx->sample_period < 10000)
+		/* ignore warmup */
+		return 0;
 
 	bpf_get_current_comm(&key.comm, sizeof(key.comm));
 	key.kernstack = bpf_get_stackid(ctx, &stackmap, KERN_STACKID_FLAGS);

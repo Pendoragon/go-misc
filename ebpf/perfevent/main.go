@@ -63,9 +63,15 @@ func main() {
 		log.Fatalf("opening perf event: %v", err)
 	}
 
-	err = attachPerfEvent(fd, objs.BpfProg1)
+	// err = attachPerfEvent(fd, objs.BpfProg1)
+	err = unix.IoctlSetInt(fd, unix.PERF_EVENT_IOC_SET_BPF, objs.BpfProg1.FD())
 	if err != nil {
 		log.Fatalf("attaching perf event: %v", err)
+	}
+
+	err = unix.IoctlSetInt(fd, unix.PERF_EVENT_IOC_ENABLE, 0)
+	if err != nil {
+		log.Fatalf("enable perf event: %v", err)
 	}
 
 	// Read loop reporting the total amount of times the kernel
@@ -83,25 +89,27 @@ func main() {
 			log.Printf("kernel stack id: %v; user stack id: %v; seen times: %d", countsKey.KernStackId, countsKey.UserStackId, countsValue)
 
 			var userStack, kernStack callStack
-			err := objs.Stackmap.Lookup(unsafe.Pointer(&countsKey.KernStackId), &kernStack)
+			err := objs.Stackmap.Lookup(&countsKey.KernStackId, &kernStack)
 			if err != nil {
 				log.Printf("Failed to lookup kernel stack with id: %d, %v", countsKey.KernStackId, err)
 			}
 
-			err = objs.Stackmap.Lookup(unsafe.Pointer(&countsKey.UserStackId), &userStack)
+			err = objs.Stackmap.Lookup(&countsKey.UserStackId, &userStack)
 			if err != nil {
 				log.Printf("Failed to lookup user stack with id: %d, %v", countsKey.UserStackId, err)
 			}
 
 			// print stack
+			log.Println("Kernel stack:")
 			for _, addr := range kernStack {
 				if addr != uint64(0) {
-					log.Printf("0x%x", addr)
+					log.Printf("\t0x%x", addr)
 				}
 			}
+			log.Println("User stack:")
 			for _, addr := range userStack {
 				if addr != uint64(0) {
-					log.Printf("0x%x", addr)
+					log.Printf("\t0x%x", addr)
 				}
 			}
 
