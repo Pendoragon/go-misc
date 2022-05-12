@@ -10,8 +10,8 @@ package main
 import (
 	"flag"
 	"log"
-	"unsafe"
 	"time"
+	"unsafe"
 
 	"github.com/cilium/ebpf/rlimit"
 	"golang.org/x/sys/unix"
@@ -24,7 +24,7 @@ const TASK_COMM_LEN int = 16
 const MAX_STACK_DEPTH int = 127
 
 type countsMapKey struct {
-	TaskComm  [TASK_COMM_LEN]byte
+	TaskComm    [TASK_COMM_LEN]byte
 	KernStackId int32
 	UserStackId int32
 }
@@ -35,12 +35,12 @@ func main() {
 	target_pid := flag.Int("pid", -1, "PID of the process whose stack traces will be collected. Default to -1, i.e. all processes")
 	flag.Parse()
 
-		// Allow the current process to lock memory for eBPF resources.
+	// Allow the current process to lock memory for eBPF resources.
 	if err := rlimit.RemoveMemlock(); err != nil {
 		log.Fatal(err)
 	}
 
-	objs:= bpfObjects{}
+	objs := bpfObjects{}
 	if err := loadBpfObjects(&objs, nil); err != nil {
 		log.Fatalf("loading bpf objects: %v", err)
 	}

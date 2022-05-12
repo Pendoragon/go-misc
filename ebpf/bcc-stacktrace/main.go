@@ -8,20 +8,16 @@
 package main
 
 import (
+	"bytes"
+	_ "embed"
+	"encoding/binary"
 	"flag"
 	"log"
-	// "unsafe"
-	_ "embed"
 	"time"
-	"bytes"
-	"encoding/binary"
-	// "os"
-	// "os/signal"
 
 	bpf "github.com/iovisor/gobpf/bcc"
 	unix "golang.org/x/sys/unix"
 )
-
 
 //go:embed stack_trace.c
 var source string
@@ -30,7 +26,7 @@ const TASK_COMM_LEN int = 16
 const MAX_STACK_DEPTH int = 127
 
 type countsMapKey struct {
-	TaskComm  [TASK_COMM_LEN]byte
+	TaskComm    [TASK_COMM_LEN]byte
 	KernStackId int32
 	UserStackId int32
 }
@@ -57,7 +53,7 @@ func main() {
 	}
 
 	countsTable := bpf.NewTable(m.TableId("counts"), m)
-	// stackmapTable := bpf.NewTable(m.TableId("stackmap"), m)
+	stackmapTable := bpf.NewTable(m.TableId("stackmap"), m)
 
 	// sig := make(chan os.Signal, 1)
 	// signal.Notify(sig, os.Interrupt, os.Kill)
@@ -115,32 +111,47 @@ func main() {
 			log.Println("==============================================================================================================")
 			log.Printf("kernel stack id: %v; user stack id: %v; seen times: %d", countsKey.KernStackId, countsKey.UserStackId, countsValue)
 
-			// var userStack, kernStack callStack
-			// err := objs.Stackmap.Lookup(&countsKey.KernStackId, &kernStack)
-			// if err != nil {
-			// 	log.Printf("Failed to lookup kernel stack with id: %d, %v", countsKey.KernStackId, err)
-			// }
+			var userStackBytes, kernStackBytes []byte
+			var userStack, kernStack callStack
 
-			// err = objs.Stackmap.Lookup(&countsKey.UserStackId, &userStack)
-			// if err != nil {
-			// 	log.Printf("Failed to lookup user stack with id: %d, %v", countsKey.UserStackId, err)
-			// }
+			bs := make([]byte, 4)
+			binary.LittleEndian.PutUint32(bs, uint32(countsKey.KernStackId))
+			kernStackBytes, err = stackmapTable.Get(bs)
+			if err != nil {
+				log.Printf("Failed to lookup kernel stack with id: %d, %v", countsKey.KernStackId, err)
+			} else {
+				err = binary.Read(bytes.NewBuffer(kernStackBytes), binary.LittleEndian, &kernStack)
+				if err != nil {
+					log.Printf("decoding kernel stack: %v", countsKey.KernStackId)
+				}
+			}
 
-			// // print stack
-			// log.Println("Kernel stack:")
-			// for _, addr := range kernStack {
-			// 	if addr != uint64(0) {
-			// 		log.Printf("\t0x%x", addr)
-			// 	}
-			// }
-			// log.Println("User stack:")
-			// for _, addr := range userStack {
-			// 	if addr != uint64(0) {
-			// 		log.Printf("\t0x%x", addr)
-			// 	}
-			// }
+			binary.LittleEndian.PutUint32(bs, uint32(countsKey.UserStackId))
+			userStackBytes, err = stackmapTable.Get(bs)
+			if err != nil {
+				log.Printf("Failed to lookup user stack with id: %d, %v", countsKey.UserStackId, err)
+			} else {
+				err = binary.Read(bytes.NewBuffer(userStackBytes), binary.LittleEndian, &userStack)
+				if err != nil {
+					log.Printf("decoding user stack: %v", countsKey.UserStackId)
+				}
+			}
 
-			// log.Println("==============================================================================================================")
+			// print stack
+			log.Println("Kernel stack:")
+			for _, addr := range kernStack {
+				if addr != uint64(0) {
+					log.Printf("\t0x%x", addr)
+				}
+			}
+			log.Println("User stack:")
+			for _, addr := range userStack {
+				if addr != uint64(0) {
+					log.Printf("\t0x%x", addr)
+				}
+			}
+
+			log.Println("==============================================================================================================")
 		}
 	}
 }
