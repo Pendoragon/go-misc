@@ -33,8 +33,13 @@ type countsMapKey struct {
 
 type callStack [MAX_STACK_DEPTH]uint64
 
+// TODO:
+//   1. Add kernel/user symbol resolution
+//   2. Create pprof data from stack trace
+//   3. Change the observed entity from a single process to a container
 func main() {
 	target_pid := flag.Int("pid", -1, "PID of the process whose stack traces will be collected. Default to -1, i.e. all processes")
+	duration := flag.Duration("duration", 5*time.Second, "Duration of the profiling. Default to 5s")
 	flag.Parse()
 	cflags := []string{}
 
@@ -47,6 +52,8 @@ func main() {
 		log.Fatalf("Failed to load bpf_prog1: %v\n", err)
 	}
 
+	// Open a perf event of type PERF_TYPE_SOFTWARE, setting sample rate to 100Hz(i.e. 100 samples/s) for process with target_pid
+	// on any CPU. And attach the bpf program to it.
 	err = m.AttachPerfEvent(unix.PERF_TYPE_SOFTWARE, unix.PERF_COUNT_SW_CPU_CLOCK, 0, 100, *target_pid, -1, -1, fd)
 	if err != nil {
 		log.Fatalf("Failed to attach to perf event: %v\n", err)
@@ -55,39 +62,9 @@ func main() {
 	countsTable := bpf.NewTable(m.TableId("counts"), m)
 	stackmapTable := bpf.NewTable(m.TableId("stackmap"), m)
 
-	// sig := make(chan os.Signal, 1)
-	// signal.Notify(sig, os.Interrupt, os.Kill)
-	// fd, err := unix.PerfEventOpen(
-	// 	&unix.PerfEventAttr{
-	// 		Type:   unix.PERF_TYPE_SOFTWARE,
-	// 		Config: unix.PERF_COUNT_SW_CPU_CLOCK,
-	// 		Size:   uint32(unsafe.Sizeof(unix.PerfEventAttr{})),
-	// 		Sample: 100,
-	// 		Bits:   unix.PerfBitDisabled | unix.PerfBitFreq,
-	// 	},
-	// 	*target_pid,
-	// 	-1,
-	// 	-1,
-	// 	unix.PERF_FLAG_FD_CLOEXEC,
-	// )
-	// if err != nil {
-	// 	log.Fatalf("opening perf event: %v", err)
-	// }
-
-	// // err = attachPerfEvent(fd, objs.BpfProg1)
-	// err = unix.IoctlSetInt(fd, unix.PERF_EVENT_IOC_SET_BPF, objs.BpfProg1.FD())
-	// if err != nil {
-	// 	log.Fatalf("attaching perf event: %v", err)
-	// }
-
-	// err = unix.IoctlSetInt(fd, unix.PERF_EVENT_IOC_ENABLE, 0)
-	// if err != nil {
-	// 	log.Fatalf("enable perf event: %v", err)
-	// }
-
 	// Read loop reporting the total amount of times the kernel
 	// function was entered, once per second.
-	ticker := time.NewTicker(1 * time.Second)
+	ticker := time.NewTicker(*duration)
 	defer ticker.Stop()
 
 	for range ticker.C {
