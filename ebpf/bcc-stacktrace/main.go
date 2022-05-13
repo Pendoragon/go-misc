@@ -12,10 +12,13 @@ import (
 	_ "embed"
 	"encoding/binary"
 	"flag"
+	"fmt"
 	"log"
+	"os"
 	"time"
 
 	bpf "github.com/iovisor/gobpf/bcc"
+	"github.com/google/pprof/profile"
 	unix "golang.org/x/sys/unix"
 )
 
@@ -25,8 +28,10 @@ var source string
 const TASK_COMM_LEN int = 16
 const MAX_STACK_DEPTH int = 127
 
+// KernStackId/UserStackId can be nagative, e.g. -14 if stack not found
 type countsMapKey struct {
 	TaskComm    [TASK_COMM_LEN]byte
+	Pid         uint32
 	KernStackId int32
 	UserStackId int32
 }
@@ -72,7 +77,12 @@ func main() {
 		var countsKeyBytes, countsValueBytes []byte
 		var countsKey countsMapKey
 		var countsValue uint64
+		samplesMap := map[[2]callStack]*profile.Sample{}
+		locations := []*profile.Location{}
+		// Map {Pid, Address} => ID of location. Userspace address for different process can overlap
+		locationIdMap := map[[2]uint64]int{}
 
+		// Each entry in counts map is a sample in pprof
 		for itCounts.Next() {
 			countsKeyBytes = itCounts.Key()
 			countsValueBytes = itCounts.Leaf()
@@ -114,6 +124,63 @@ func main() {
 				}
 			}
 
+			sampleKey := [2]callStack{
+				kernStack,
+				userStack,
+			}
+			// If we've seen the stack trace with different stack id, simply add to sample value
+			s, ok := samplesMap[sampleKey]
+			if ok {
+				s.Value[0] += int64(countsValue)
+				continue
+			}
+
+			// Build sample locations
+			sampleLocations := []*profile.Location{}
+			for _, addr := range kernStack {
+				if addr != uint64(0) {
+					idKey := [2]uint64{
+						uint64(0),
+						addr,
+					}
+					id, ok := locationIdMap[idKey]
+					if !ok {
+						id = len(locationIdMap)
+						l := &profile.Location{
+							ID: uint64(id + 1),
+							Address: addr,
+						}
+						locationIdMap[idKey] = id
+						locations = append(locations, l)
+					}
+					sampleLocations = append(sampleLocations, locations[id])
+				}
+			}
+			for _, addr := range userStack {
+				if addr != uint64(0) {
+					idKey := [2]uint64{
+						uint64(countsKey.Pid),
+						addr,
+					}
+					id, ok := locationIdMap[idKey]
+					if !ok {
+						id = len(locationIdMap)
+						l := &profile.Location{
+							ID: uint64(id + 1),
+							Address: addr,
+						}
+						locationIdMap[idKey] = id
+						locations = append(locations, l)
+					}
+					sampleLocations = append(sampleLocations, locations[id])
+				}
+			}
+
+			sample := &profile.Sample{
+				Location: locations,
+				Value: []int64{int64(countsValue)},
+			}
+			samplesMap[sampleKey] = sample
 			// print stack
 			log.Println("Kernel stack:")
 			for _, addr := range kernStack {
@@ -129,6 +196,37 @@ func main() {
 			}
 
 			log.Println("==============================================================================================================")
+		}
+		var samples []*profile.Sample
+		for _, s := range samplesMap {
+			samples = append(samples, s)
+		}
+		// Build profile and write to pprof file
+		p := profile.Profile{
+			PeriodType: &profile.ValueType{
+				Type: "cpu",
+				Unit: "nanoseconds",
+			},
+			Period: 10000000,
+			SampleType: []*profile.ValueType{
+				{
+					Type: "samples",
+					Unit: "count",
+				},
+			},
+			Sample: samples,
+			Location: locations,
+		}
+		log.Printf("%+v", p)
+		// Create a new file to write the profile to.
+		pprofFileName := fmt.Sprintf("profile.pb.gz-%s", time.Now().Format("20060102150405"))
+		f, err := os.Create(pprofFileName)
+		if err != nil {
+			log.Printf("Creating pprof file: %v", err)
+		}
+		// Write the profile to the file.
+		if err := p.Write(f); err != nil {
+			log.Printf("Writing to pprof file: %v", err)
 		}
 	}
 }
