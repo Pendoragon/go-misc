@@ -177,7 +177,7 @@ func main() {
 			}
 
 			sample := &profile.Sample{
-				Location: locations,
+				Location: sampleLocations,
 				Value: []int64{int64(countsValue)},
 			}
 			samplesMap[sampleKey] = sample
@@ -194,7 +194,7 @@ func main() {
 					log.Printf("\t0x%x", addr)
 				}
 			}
-
+			log.Printf("%+v", sample)
 			log.Println("==============================================================================================================")
 		}
 		var samples []*profile.Sample
@@ -216,8 +216,22 @@ func main() {
 			},
 			Sample: samples,
 			Location: locations,
+			Function: []*profile.Function{},
 		}
 		log.Printf("%+v", p)
+		// Add lines to locations
+		for _, l := range p.Location {
+			function := &profile.Function{
+				ID: uint64(len(p.Function) + 1),
+				Name: fmt.Sprintf("0x%x", l.Address),
+			}
+			p.Function = append(p.Function, function)
+			l.Line = []profile.Line{
+				{
+					Function: function,
+				},
+			}
+		}
 		// Create a new file to write the profile to.
 		pprofFileName := fmt.Sprintf("profile.pb.gz-%s", time.Now().Format("20060102150405"))
 		f, err := os.Create(pprofFileName)
