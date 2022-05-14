@@ -197,11 +197,22 @@ func main() {
 			log.Printf("%+v", sample)
 			log.Println("==============================================================================================================")
 		}
+		// Clean the bpf tables
+		err = countsTable.DeleteAll()
+		if err != nil {
+			log.Printf("Failed to clean counts table: %v", err)
+		}
+		err = stackmapTable.DeleteAll()
+		if err != nil {
+			log.Printf("Failed to clean stackmap table: %v", err)
+		}
+
+		// Build profile and write to pprof file
 		var samples []*profile.Sample
 		for _, s := range samplesMap {
 			samples = append(samples, s)
 		}
-		// Build profile and write to pprof file
+
 		p := profile.Profile{
 			PeriodType: &profile.ValueType{
 				Type: "cpu",
