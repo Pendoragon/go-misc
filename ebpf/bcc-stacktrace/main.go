@@ -15,10 +15,12 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"sort"
 	"time"
 
 	bpf "github.com/iovisor/gobpf/bcc"
 	"github.com/google/pprof/profile"
+	"github.com/pendoragon/code/ebpf/bcc-stacktrace/pkg/ksym"
 	unix "golang.org/x/sys/unix"
 )
 
@@ -39,9 +41,8 @@ type countsMapKey struct {
 type callStack [MAX_STACK_DEPTH]uint64
 
 // TODO:
-//   1. Add kernel/user symbol resolution
-//   2. Create pprof data from stack trace
-//   3. Change the observed entity from a single process to a container
+//   1. Add user symbol resolution
+//   2. Change the observed entity from a single process to a container
 func main() {
 	target_pid := flag.Int("pid", -1, "PID of the process whose stack traces will be collected. Default to -1, i.e. all processes")
 	duration := flag.Duration("duration", 5*time.Second, "Duration of the profiling. Default to 5s")
@@ -67,8 +68,7 @@ func main() {
 	countsTable := bpf.NewTable(m.TableId("counts"), m)
 	stackmapTable := bpf.NewTable(m.TableId("stackmap"), m)
 
-	// Read loop reporting the total amount of times the kernel
-	// function was entered, once per second.
+	// Read, process and clean counts/stackmap table
 	ticker := time.NewTicker(*duration)
 	defer ticker.Stop()
 
@@ -79,6 +79,7 @@ func main() {
 		var countsValue uint64
 		samplesMap := map[[2]callStack]*profile.Sample{}
 		locations := []*profile.Location{}
+		functions := []*profile.Function{}
 		// Map {Pid, Address} => ID of location. Userspace address for different process can overlap
 		locationIdMap := map[[2]uint64]int{}
 
@@ -136,6 +137,7 @@ func main() {
 			}
 
 			// Build sample locations
+			var kernAddrs []uint64
 			sampleLocations := []*profile.Location{}
 			for _, addr := range kernStack {
 				if addr != uint64(0) {
@@ -152,10 +154,52 @@ func main() {
 						}
 						locationIdMap[idKey] = id
 						locations = append(locations, l)
+						kernAddrs = append(kernAddrs, addr)
 					}
 					sampleLocations = append(sampleLocations, locations[id])
 				}
 			}
+			// print stack
+			log.Println("Kernel stack:")
+			for _, addr := range kernStack {
+				if addr != uint64(0) {
+					log.Printf("\t0x%x", addr)
+				}
+			}
+			log.Println("User stack:")
+			for _, addr := range userStack {
+				if addr != uint64(0) {
+					log.Printf("\t0x%x", addr)
+				}
+			}
+
+			// Sort kernel address for symbol resolution
+			sort.Slice(kernAddrs, func(i, j int) bool { return kernAddrs[i] < kernAddrs[j] })
+			syms := ksym.ResolveAddrs(kernAddrs)
+			for i, addr := range kernAddrs {
+				idKey := [2]uint64{
+					uint64(0),
+					addr,
+				}
+				index, ok := locationIdMap[idKey]
+				// Address is successfully resolved
+				if ok {
+					log.Printf("Adding function with: 0x%x\t%s", addr, syms[i])
+					f := &profile.Function{
+						ID: uint64(len(functions) + 1),
+						Name: syms[i],
+						SystemName: "kernel",
+					}
+					// Assuming no duplicate functions
+					functions = append(functions, f)
+					locations[index].Line = []profile.Line{
+						{
+							Function: f,
+						},
+					}
+				}
+			}
+
 			for _, addr := range userStack {
 				if addr != uint64(0) {
 					idKey := [2]uint64{
@@ -181,19 +225,6 @@ func main() {
 				Value: []int64{int64(countsValue)},
 			}
 			samplesMap[sampleKey] = sample
-			// print stack
-			log.Println("Kernel stack:")
-			for _, addr := range kernStack {
-				if addr != uint64(0) {
-					log.Printf("\t0x%x", addr)
-				}
-			}
-			log.Println("User stack:")
-			for _, addr := range userStack {
-				if addr != uint64(0) {
-					log.Printf("\t0x%x", addr)
-				}
-			}
 			log.Printf("%+v", sample)
 			log.Println("==============================================================================================================")
 		}
@@ -227,23 +258,10 @@ func main() {
 			},
 			Sample: samples,
 			Location: locations,
-			Function: []*profile.Function{},
+			Function: functions,
 		}
 		log.Printf("%+v", p)
-		// Add lines to locations
-		for _, l := range p.Location {
-			function := &profile.Function{
-				ID: uint64(len(p.Function) + 1),
-				Name: fmt.Sprintf("0x%x", l.Address),
-			}
-			p.Function = append(p.Function, function)
-			l.Line = []profile.Line{
-				{
-					Function: function,
-				},
-			}
-		}
-		// Create a new file to write the profile to.
+
 		pprofFileName := fmt.Sprintf("profile.pb.gz-%s", time.Now().Format("20060102150405"))
 		f, err := os.Create(pprofFileName)
 		if err != nil {
