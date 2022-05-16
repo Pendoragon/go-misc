@@ -39,9 +39,8 @@ int bpf_prog1(struct bpf_perf_event_data *ctx)
 	u64 *val, one = 1;
 	int ret;
 
-	if (ctx->sample_period < 10000)
-		/* ignore warmup */
-		return 0;
+  bpf_trace_printk("CPU-%d period %lld ip %llx", cpu, ctx->sample_period,
+                   PT_REGS_IP(&ctx->regs));
 
 	bpf_get_current_comm(&key.comm, sizeof(key.comm));
 	key.kernstack = stackmap.get_stackid(ctx, KERN_STACKID_FLAGS);
@@ -49,7 +48,7 @@ int bpf_prog1(struct bpf_perf_event_data *ctx)
   key.pid = tgid;
 	if ((int)key.kernstack < 0 && (int)key.userstack < 0) {
 		bpf_trace_printk("CPU-%d period %lld ip %llx", cpu, ctx->sample_period,
-				 PT_REGS_IP(&ctx->regs));
+                     PT_REGS_IP(&ctx->regs));
 		return 0;
 	}
 

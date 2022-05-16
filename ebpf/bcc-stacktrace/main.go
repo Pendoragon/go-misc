@@ -15,6 +15,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"runtime"
 	"sort"
 	"time"
 
@@ -60,9 +61,12 @@ func main() {
 
 	// Open a perf event of type PERF_TYPE_SOFTWARE, setting sample rate to 100Hz(i.e. 100 samples/s) for process with target_pid
 	// on any CPU. And attach the bpf program to it.
-	err = m.AttachPerfEvent(unix.PERF_TYPE_SOFTWARE, unix.PERF_COUNT_SW_CPU_CLOCK, 0, 100, *target_pid, -1, -1, fd)
-	if err != nil {
-		log.Fatalf("Failed to attach to perf event: %v\n", err)
+	cpus := runtime.NumCPU()
+	for i := 0; i < cpus; i++ {
+		err = m.AttachPerfEvent(unix.PERF_TYPE_SOFTWARE, unix.PERF_COUNT_SW_CPU_CLOCK, 0, 100, *target_pid, i, -1, fd)
+		if err != nil {
+			log.Fatalf("Failed to attach to perf event: %v\n", err)
+		}
 	}
 
 	countsTable := bpf.NewTable(m.TableId("counts"), m)
@@ -209,9 +213,21 @@ func main() {
 					id, ok := locationIdMap[idKey]
 					if !ok {
 						id = len(locationIdMap)
+						// TODO: try to resolve user stack symbols
+						f := &profile.Function{
+							ID: uint64(len(functions) + 1),
+							Name: fmt.Sprintf("0x%x", addr),
+							SystemName: "User",
+						}
+					  functions = append(functions, f)
 						l := &profile.Location{
 							ID: uint64(id + 1),
 							Address: addr,
+							Line: []profile.Line{
+								{
+									Function: f,
+								},
+							},
 						}
 						locationIdMap[idKey] = id
 						locations = append(locations, l)

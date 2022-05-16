@@ -9,19 +9,22 @@ RUN sed -i 's/archive.ubuntu.com/mirrors.aliyun.com/' /etc/apt/sources.list
 RUN apt-get update && apt install -y wget lsb-release software-properties-common && wget https://apt.llvm.org/llvm.sh && chmod +x llvm.sh && ./llvm.sh 10 && ./llvm.sh 14
 ENV PATH "$PATH:/usr/lib/llvm-14/bin"
 
-# Build/Install bpftrace
+# Build/Install bpftrace and perf tools
 RUN apt-get install -y bpftrace
 
 # WORKDIR
 WORKDIR /root
 
 # Install GO
-RUN apt-get install -y gcc libc6-dev git vim lrzsz
+RUN apt-get update && apt-get install -y gcc libc6-dev git vim lrzsz
 RUN wget https://go.dev/dl/go1.18.linux-amd64.tar.gz && tar -C /usr/local -zxf go1.18.linux-amd64.tar.gz
 ENV GOROOT=/usr/local/go
 ENV PATH=$PATH:$GOROOT/bin
 ENV GOPATH=/root/go
 ENV PATH=$PATH:$GOPATH/bin
+
+RUN apt-get install -y linux-tools-common linux-tools-generic
+RUN ln -fs /usr/lib/linux-tools/*/perf /usr/bin/perf
 
 # Build/Install bcc
 RUN DEBIAN_FRONTEND="noninteractive" apt install -y kmod vim bison build-essential cmake flex git libedit-dev \
