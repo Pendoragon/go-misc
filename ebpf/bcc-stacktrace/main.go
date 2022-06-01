@@ -18,8 +18,10 @@ import (
 	"runtime"
 	"sort"
 	"time"
+	"unsafe"
 
 	bpf "github.com/iovisor/gobpf/bcc"
+	bcc "github.com/pendoragon/code/ebpf/bcc-stacktrace/pkg/bcc"
 	"github.com/google/pprof/profile"
 	"github.com/pendoragon/code/ebpf/bcc-stacktrace/pkg/ksym"
 	unix "golang.org/x/sys/unix"
@@ -50,7 +52,7 @@ func main() {
 	flag.Parse()
 	cflags := []string{}
 
-	m := bpf.NewModule(source, cflags)
+	m := bcc.NewModule(source, cflags)
 	defer m.Close()
 
 	// Load the bpf program with type BPF_PROG_TYPE_PERF_EVENT
@@ -63,14 +65,21 @@ func main() {
 	// on any CPU. And attach the bpf program to it.
 	cpus := runtime.NumCPU()
 	for i := 0; i < cpus; i++ {
-		err = m.AttachPerfEvent(unix.PERF_TYPE_SOFTWARE, unix.PERF_COUNT_SW_CPU_CLOCK, 0, 100, *target_pid, i, -1, fd)
+		attr := &unix.PerfEventAttr{
+			Type:   unix.PERF_TYPE_SOFTWARE,
+			Config: unix.PERF_COUNT_SW_CPU_CLOCK,
+			Size:   uint32(unsafe.Sizeof(unix.PerfEventAttr{})),
+			Sample: 100,
+			Bits:   unix.PerfBitDisabled | unix.PerfBitFreq,
+		}
+		err = m.AttachPerfEventRaw(fd, attr, *target_pid, i, -1, 0)
 		if err != nil {
 			log.Fatalf("Failed to attach to perf event: %v\n", err)
 		}
 	}
 
-	countsTable := bpf.NewTable(m.TableId("counts"), m)
-	stackmapTable := bpf.NewTable(m.TableId("stackmap"), m)
+	countsTable := bpf.NewTable(m.Module.TableId("counts"), m.Module)
+	stackmapTable := bpf.NewTable(m.Module.TableId("stackmap"), m.Module)
 
 	// Read, process and clean counts/stackmap table
 	ticker := time.NewTicker(*duration)
