@@ -81,14 +81,18 @@ func main() {
 		var countsKeyBytes, countsValueBytes []byte
 		var countsKey countsMapKey
 		var countsValue uint64
-		samplesMap := map[[2]callStack]*profile.Sample{}
-		locations := []*profile.Location{}
-		functions := []*profile.Function{}
-		// Map {Pid, Address} => ID of location. Userspace address for different process can overlap
-		locationIdMap := map[[2]uint64]int{}
+		// It is possible that we see same call stack with different stackId, because stackId is
+		// not derived from call stack alone. It is also possible that different processes have the
+		// exact same call stack.
+		pSamples := map[uint32]map[[2]callStack]*profile.Sample{}
+		// Map from pid to locations, functions and location Ids
+		pLocations := map[uint32][]*profile.Location{}
+		pFunctions := map[uint32][]*profile.Function{}
+		pLocationIds := map[uint32]map[uint64]int{}
 
 		// Each entry in counts map is a sample in pprof
 		for itCounts.Next() {
+			// parse entries from bpf maps
 			countsKeyBytes = itCounts.Key()
 			countsValueBytes = itCounts.Leaf()
 			err := binary.Read(bytes.NewBuffer(countsKeyBytes), binary.LittleEndian, &countsKey)
@@ -129,6 +133,24 @@ func main() {
 				}
 			}
 
+			// Get datas per process
+			locations, ok := pLocations[countsKey.Pid]
+			if !ok {
+				locations = []*profile.Location{}
+			}
+			functions, ok := pFunctions[countsKey.Pid]
+			if !ok {
+				functions = []*profile.Function{}
+			}
+			samplesMap, ok := pSamples[countsKey.Pid]
+			if !ok {
+				samplesMap = map[[2]callStack]*profile.Sample{}
+			}
+			locationIdMap, ok := pLocationIds[countsKey.Pid]
+			if !ok {
+				locationIdMap = map[uint64]int{}
+			}
+
 			sampleKey := [2]callStack{
 				kernStack,
 				userStack,
@@ -145,18 +167,18 @@ func main() {
 			sampleLocations := []*profile.Location{}
 			for _, addr := range kernStack {
 				if addr != uint64(0) {
-					idKey := [2]uint64{
-						uint64(0),
-						addr,
-					}
-					id, ok := locationIdMap[idKey]
+					// idKey := [2]uint64{
+					// 	uint64(0),
+					// 	addr,
+					// }
+					id, ok := locationIdMap[addr]
 					if !ok {
 						id = len(locationIdMap)
 						l := &profile.Location{
 							ID: uint64(id + 1),
 							Address: addr,
 						}
-						locationIdMap[idKey] = id
+						locationIdMap[addr] = id
 						locations = append(locations, l)
 						kernAddrs = append(kernAddrs, addr)
 					}
@@ -181,11 +203,11 @@ func main() {
 			sort.Slice(kernAddrs, func(i, j int) bool { return kernAddrs[i] < kernAddrs[j] })
 			syms := ksym.ResolveAddrs(kernAddrs)
 			for i, addr := range kernAddrs {
-				idKey := [2]uint64{
-					uint64(0),
-					addr,
-				}
-				index, ok := locationIdMap[idKey]
+				// idKey := [2]uint64{
+				// 	uint64(0),
+				// 	addr,
+				// }
+				index, ok := locationIdMap[addr]
 				// Address is successfully resolved
 				if ok {
 					log.Printf("Adding function with: 0x%x\t%s", addr, syms[i])
@@ -206,11 +228,11 @@ func main() {
 
 			for _, addr := range userStack {
 				if addr != uint64(0) {
-					idKey := [2]uint64{
-						uint64(countsKey.Pid),
-						addr,
-					}
-					id, ok := locationIdMap[idKey]
+					// idKey := [2]uint64{
+					// 	uint64(countsKey.Pid),
+					// 	addr,
+					// }
+					id, ok := locationIdMap[addr]
 					if !ok {
 						id = len(locationIdMap)
 						// TODO: try to resolve user stack symbols
@@ -229,7 +251,7 @@ func main() {
 								},
 							},
 						}
-						locationIdMap[idKey] = id
+						locationIdMap[addr] = id
 						locations = append(locations, l)
 					}
 					sampleLocations = append(sampleLocations, locations[id])
@@ -243,6 +265,11 @@ func main() {
 			samplesMap[sampleKey] = sample
 			log.Printf("%+v", sample)
 			log.Println("==============================================================================================================")
+
+			pLocations[countsKey.Pid] = locations
+			pFunctions[countsKey.Pid] = functions
+			pSamples[countsKey.Pid] = samplesMap
+			pLocationIds[countsKey.Pid] = locationIdMap
 		}
 		// Clean the bpf tables
 		err = countsTable.DeleteAll()
@@ -254,38 +281,40 @@ func main() {
 			log.Printf("Failed to clean stackmap table: %v", err)
 		}
 
-		// Build profile and write to pprof file
-		var samples []*profile.Sample
-		for _, s := range samplesMap {
-			samples = append(samples, s)
-		}
+		for pid, samplesMap := range pSamples {
+			// Build profile and write to pprof file
+			var samples []*profile.Sample
+			for _, s := range samplesMap {
+				samples = append(samples, s)
+			}
 
-		p := profile.Profile{
-			PeriodType: &profile.ValueType{
-				Type: "cpu",
-				Unit: "nanoseconds",
-			},
-			Period: 10000000,
-			SampleType: []*profile.ValueType{
-				{
-					Type: "samples",
-					Unit: "count",
+			p := profile.Profile{
+				PeriodType: &profile.ValueType{
+					Type: "cpu",
+					Unit: "nanoseconds",
 				},
-			},
-			Sample: samples,
-			Location: locations,
-			Function: functions,
-		}
-		log.Printf("%+v", p)
+				Period: 10000000,
+				SampleType: []*profile.ValueType{
+					{
+						Type: "samples",
+						Unit: "count",
+					},
+				},
+				Sample: samples,
+				Location: pLocations[pid],
+				Function: pFunctions[pid],
+			}
+			log.Printf("%+v", p)
 
-		pprofFileName := fmt.Sprintf("profile.pb.gz-%s", time.Now().Format("20060102150405"))
-		f, err := os.Create(pprofFileName)
-		if err != nil {
-			log.Printf("Creating pprof file: %v", err)
-		}
-		// Write the profile to the file.
-		if err := p.Write(f); err != nil {
-			log.Printf("Writing to pprof file: %v", err)
+			pprofFileName := fmt.Sprintf("profile.pb.gz-%d-%s", pid, time.Now().Format("20060102150405"))
+			f, err := os.Create(pprofFileName)
+			if err != nil {
+				log.Printf("Creating pprof file: %v", err)
+			}
+			// Write the profile to the file.
+			if err := p.Write(f); err != nil {
+				log.Printf("Writing to pprof file: %v", err)
+			}
 		}
 	}
 }

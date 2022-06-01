@@ -31,8 +31,9 @@ RUN DEBIAN_FRONTEND="noninteractive" apt install -y kmod vim bison build-essenti
   libcap-dev zlib1g-dev libelf-dev libfl-dev python3.8 python3-pip python3.8-dev clang libclang-dev && \
   ln -s $(which python3) /usr/bin/python
 RUN git clone https://github.com/iovisor/bcc.git && \
-    mkdir bcc/build && \
-    cd bcc/build && \
+    cd bcc && git reset --hard v0.24.0 && \
+    mkdir build && \
+    cd build && \
     cmake .. && \
     make && \
     make install && \
@@ -47,4 +48,4 @@ RUN git clone --recurse-submodules https://github.com/libbpf/bpftool.git && \
     cd bpftool/src && \
     make install
 
-CMD mount -t debugfs debugfs /sys/kernel/debug && /bin/bash
+CMD mount -t debugfs debugfs /sys/kernel/debug && echo 0 > /proc/sys/kernel/kptr_restrict && /bin/bash
