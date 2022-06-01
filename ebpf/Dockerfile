@@ -1,4 +1,4 @@
-FROM docker/for-desktop-kernel:5.10.76-505289bcc85427a04d8d797e06cbca92eee291f4 AS ksrc
+FROM docker/for-desktop-kernel:5.10.104-ad41e9402fa6e51d2635fb92e4cb6b90107caa25 AS ksrc
 
 FROM ubuntu:20.04 AS bpftrace
 COPY --from=ksrc /kernel-dev.tar /
