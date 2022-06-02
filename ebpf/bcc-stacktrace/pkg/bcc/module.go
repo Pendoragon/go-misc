@@ -40,11 +40,11 @@ func (m *BPFModule) Close() {
 	m.Module.Close()
 }
 
-func (m *BPFModule) AttachPerfEventRaw(progfd int, attr *unix.PerfEventAttr, pid, cpu, groupFd int, extra_flags int) error {
+func (m *BPFModule) AttachPerfEventRaw(progfd int, attr *unix.PerfEventAttr, pid, cpu, groupFd int, extraFlags int) error {
 	res := []int{}
 
 	if cpu >= 0 {
-		r, err := C.bpf_attach_perf_event_raw(C.int(progfd), unsafe.Pointer(attr), C.pid_t(pid), C.int(cpu), C.int(groupFd), C.ulong(extra_flags))
+		r, err := C.bpf_attach_perf_event_raw(C.int(progfd), unsafe.Pointer(attr), C.pid_t(pid), C.int(cpu), C.int(groupFd), C.ulong(extraFlags))
 		if r < 0 {
 			return fmt.Errorf("failed to attach BPF perf event: %v", err)
 		}
@@ -57,7 +57,7 @@ func (m *BPFModule) AttachPerfEventRaw(progfd int, attr *unix.PerfEventAttr, pid
 		}
 
 		for _, i := range cpus {
-			r, err := C.bpf_attach_perf_event_raw(C.int(progfd), unsafe.Pointer(attr), C.pid_t(pid), C.int(i), C.int(groupFd), C.ulong(extra_flags))
+			r, err := C.bpf_attach_perf_event_raw(C.int(progfd), unsafe.Pointer(attr), C.pid_t(pid), C.int(i), C.int(groupFd), C.ulong(extraFlags))
 			if r < 0 {
 				return fmt.Errorf("failed to attach BPF perf event: %v", err)
 			}

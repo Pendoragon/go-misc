@@ -24,7 +24,7 @@ import (
 	bcc "github.com/pendoragon/code/ebpf/bcc-stacktrace/pkg/bcc"
 	"github.com/google/pprof/profile"
 	"github.com/pendoragon/code/ebpf/bcc-stacktrace/pkg/ksym"
-	unix "golang.org/x/sys/unix"
+	"golang.org/x/sys/unix"
 )
 
 //go:embed stack_trace.c
@@ -49,7 +49,20 @@ type callStack [MAX_STACK_DEPTH]uint64
 func main() {
 	target_pid := flag.Int("pid", -1, "PID of the process whose stack traces will be collected. Default to -1, i.e. all processes")
 	duration := flag.Duration("duration", 5*time.Second, "Duration of the profiling. Default to 5s")
+	cgroupDir := flag.String("cgroup", "", "Cgroup directory")
 	flag.Parse()
+
+	extraFlags := 0
+	target := *target_pid
+
+	if *cgroupDir != "" {
+		cgroup, err := os.Open(*cgroupDir)
+		if err != nil {
+			log.Fatalf("Failed to open cgroup directory %s: %v", *cgroupDir, err)
+		}
+		target = int(cgroup.Fd())
+		extraFlags |= unix.PERF_FLAG_PID_CGROUP
+	}
 	cflags := []string{}
 
 	m := bcc.NewModule(source, cflags)
@@ -72,7 +85,7 @@ func main() {
 			Sample: 100,
 			Bits:   unix.PerfBitDisabled | unix.PerfBitFreq,
 		}
-		err = m.AttachPerfEventRaw(fd, attr, *target_pid, i, -1, 0)
+		err = m.AttachPerfEventRaw(fd, attr, target, i, -1, extraFlags)
 		if err != nil {
 			log.Fatalf("Failed to attach to perf event: %v\n", err)
 		}
