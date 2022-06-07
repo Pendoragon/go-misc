@@ -45,7 +45,6 @@ type callStack [MAX_STACK_DEPTH]uint64
 
 // TODO:
 //   1. Add user symbol resolution
-//   2. Change the observed entity from a single process to a container
 func main() {
 	target_pid := flag.Int("pid", -1, "PID of the process whose stack traces will be collected. Default to -1, i.e. all processes")
 	duration := flag.Duration("duration", 5*time.Second, "Duration of the profiling. Default to 5s")
@@ -155,7 +154,7 @@ func main() {
 				}
 			}
 
-			// Get datas per process
+			// Get data per process
 			locations, ok := pLocations[countsKey.Pid]
 			if !ok {
 				locations = []*profile.Location{}
@@ -189,10 +188,6 @@ func main() {
 			sampleLocations := []*profile.Location{}
 			for _, addr := range kernStack {
 				if addr != uint64(0) {
-					// idKey := [2]uint64{
-					// 	uint64(0),
-					// 	addr,
-					// }
 					id, ok := locationIdMap[addr]
 					if !ok {
 						id = len(locationIdMap)
@@ -225,10 +220,6 @@ func main() {
 			sort.Slice(kernAddrs, func(i, j int) bool { return kernAddrs[i] < kernAddrs[j] })
 			syms := ksym.ResolveAddrs(kernAddrs)
 			for i, addr := range kernAddrs {
-				// idKey := [2]uint64{
-				// 	uint64(0),
-				// 	addr,
-				// }
 				index, ok := locationIdMap[addr]
 				// Address is successfully resolved
 				if ok {
@@ -250,10 +241,6 @@ func main() {
 
 			for _, addr := range userStack {
 				if addr != uint64(0) {
-					// idKey := [2]uint64{
-					// 	uint64(countsKey.Pid),
-					// 	addr,
-					// }
 					id, ok := locationIdMap[addr]
 					if !ok {
 						id = len(locationIdMap)
