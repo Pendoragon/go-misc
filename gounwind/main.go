@@ -18,7 +18,7 @@ func main() {
 		log.Fatalf("Failed to read gopclntab: %v", err)
 	}
 
-	pc, err := strconv.ParseUint(*addr, 16, 64)
+	pc, err := strconv.ParseUint(*addr, 0, 64)
 	if err != nil {
 		log.Fatalf("Failed to parse addr: %v", err)
 	}
