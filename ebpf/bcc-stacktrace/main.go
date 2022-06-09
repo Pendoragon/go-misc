@@ -24,6 +24,7 @@ import (
 	bcc "github.com/pendoragon/code/ebpf/bcc-stacktrace/pkg/bcc"
 	"github.com/google/pprof/profile"
 	"github.com/pendoragon/code/ebpf/bcc-stacktrace/pkg/ksym"
+	"github.com/pendoragon/code/ebpf/bcc-stacktrace/pkg/symbol"
 	"golang.org/x/sys/unix"
 )
 
@@ -33,7 +34,7 @@ var source string
 const TASK_COMM_LEN int = 16
 const MAX_STACK_DEPTH int = 127
 
-// KernStackId/UserStackId can be nagative, e.g. -14 if stack not found
+// KernStackId/UserStackId can be negative, e.g. -14 if stack not found
 type countsMapKey struct {
 	TaskComm    [TASK_COMM_LEN]byte
 	Pid         uint32
@@ -239,32 +240,37 @@ func main() {
 				}
 			}
 
+			var userAddrs []uint64
 			for _, addr := range userStack {
 				if addr != uint64(0) {
-					id, ok := locationIdMap[addr]
-					if !ok {
-						id = len(locationIdMap)
-						// TODO: try to resolve user stack symbols
-						f := &profile.Function{
-							ID: uint64(len(functions) + 1),
-							Name: fmt.Sprintf("0x%x", addr),
-							SystemName: "User",
-						}
-					  functions = append(functions, f)
-						l := &profile.Location{
-							ID: uint64(id + 1),
-							Address: addr,
-							Line: []profile.Line{
-								{
-									Function: f,
-								},
-							},
-						}
-						locationIdMap[addr] = id
-						locations = append(locations, l)
-					}
-					sampleLocations = append(sampleLocations, locations[id])
+					userAddrs = append(userAddrs, addr)
 				}
+			}
+			syms = symbol.ResolveGoSyms(countsKey.Pid, userAddrs)
+			for i, addr := range userAddrs {
+				id, ok := locationIdMap[addr]
+				if !ok {
+					id = len(locationIdMap)
+					// TODO: try to resolve user stack symbols
+					f := &profile.Function{
+						ID: uint64(len(functions) + 1),
+						Name: syms[i],
+						SystemName: "User",
+					}
+					functions = append(functions, f)
+					l := &profile.Location{
+						ID: uint64(id + 1),
+						Address: addr,
+						Line: []profile.Line{
+							{
+								Function: f,
+							},
+						},
+					}
+					locationIdMap[addr] = id
+					locations = append(locations, l)
+				}
+				sampleLocations = append(sampleLocations, locations[id])
 			}
 
 			sample := &profile.Sample{
