@@ -43,8 +43,10 @@ func ResolveGoSyms(pid uint32, addrs []uint64) []string {
 }
 
 func resolveSymbol(table *gosym.Table, pc uint64) string {
-	file, line, fn := table.PCToLine(pc)
-	fmt.Printf("%x: %s() %s:%d\n", pc, fn.Name, file, line)
+	_, _, fn := table.PCToLine(pc)
+	if fn == nil {
+		return fmt.Sprintf("0x%x", pc)
+	}
 	return fn.Name
 }
 
